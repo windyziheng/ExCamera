@@ -5,14 +5,16 @@ import android.graphics.Bitmap;
 import android.util.Size;
 import android.view.View;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 
+import com.convergence.excamera.IApp;
 import com.convergence.excamera.sdk.common.ActionState;
 import com.convergence.excamera.sdk.common.OutputUtil;
 import com.convergence.excamera.sdk.common.callback.OnCameraPhotographListener;
 import com.convergence.excamera.sdk.common.callback.OnCameraRecordListener;
+import com.convergence.excamera.sdk.common.callback.OnCameraStackAvgListener;
+import com.convergence.excamera.sdk.common.callback.OnCameraTLRecordListener;
 import com.convergence.excamera.sdk.usb.UsbCameraState;
 import com.convergence.excamera.sdk.usb.core.UsbCameraController;
 import com.convergence.excamera.sdk.usb.core.UsbCameraView;
@@ -41,7 +43,7 @@ import java.util.List;
 public class UsbMicroCamManager implements CamManager, MirrorFlipLayout.OnMirrorFlipListener,
         ConfigMixLayout.OnMixConfigListener, ConfigComLayout.OnComConfigListener,
         UsbCameraController.OnControlListener, OnCameraPhotographListener,
-        OnCameraRecordListener {
+        OnCameraRecordListener, OnCameraTLRecordListener, OnCameraStackAvgListener {
 
     private static final int EXPOSURE_MODE_AUTO = 8;
     private static final int EXPOSURE_MODE_MANUAL = 1;
@@ -68,6 +70,8 @@ public class UsbMicroCamManager implements CamManager, MirrorFlipLayout.OnMirror
         usbCameraController.setOnControlListener(this);
         usbCameraController.setOnCameraPhotographListener(this);
         usbCameraController.setOnCameraRecordListener(this);
+        usbCameraController.setOnCameraTLRecordListener(this);
+        usbCameraController.setOnCameraStackAvgListener(this);
         if (configLayout != null) {
             configLayout.setOnMirrorFlipListener(this);
             configLayout.setOnMixConfigListener(this);
@@ -124,6 +128,26 @@ public class UsbMicroCamManager implements CamManager, MirrorFlipLayout.OnMirror
     }
 
     @Override
+    public void startTLRecord(int timeLapseRate) {
+        usbCameraController.startTLRecord(timeLapseRate);
+    }
+
+    @Override
+    public void stopTLRecord() {
+        usbCameraController.stopTLRecord();
+    }
+
+    @Override
+    public void startStackAvg() {
+        usbCameraController.startStackAvg();
+    }
+
+    @Override
+    public void cancelStackAvg() {
+        usbCameraController.cancelStackAvg();
+    }
+
+    @Override
     public void showResolutionSelection() {
         UsbCameraSetting usbCameraSetting = UsbCameraSetting.getInstance();
         if (!isPreviewing() || !usbCameraSetting.isAvailable()) {
@@ -158,6 +182,11 @@ public class UsbMicroCamManager implements CamManager, MirrorFlipLayout.OnMirror
     @Override
     public boolean isRecording() {
         return usbCameraController.getCurActionState() == ActionState.Recording;
+    }
+
+    @Override
+    public boolean isTLRecording() {
+        return usbCameraController.getCurActionState() == ActionState.TLRecording;
     }
 
     /**
@@ -484,17 +513,17 @@ public class UsbMicroCamManager implements CamManager, MirrorFlipLayout.OnMirror
 
     @Override
     public void onTakePhotoSuccess(String path) {
-        Toast.makeText(context, "Done : " + path, Toast.LENGTH_SHORT).show();
+        IApp.showToast("Done : " + path);
     }
 
     @Override
     public void onTakePhotoFail() {
-        Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Fail");
     }
 
     @Override
     public void onRecordStartSuccess() {
-        Toast.makeText(context, "Start", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Start");
         if (recordTimeText != null) {
             recordTimeText.setText(OutputUtil.getRecordTimeText(0));
             recordTimeText.setVisibility(View.VISIBLE);
@@ -503,7 +532,7 @@ public class UsbMicroCamManager implements CamManager, MirrorFlipLayout.OnMirror
 
     @Override
     public void onRecordStartFail() {
-        Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Fail");
     }
 
     @Override
@@ -515,7 +544,7 @@ public class UsbMicroCamManager implements CamManager, MirrorFlipLayout.OnMirror
 
     @Override
     public void onRecordSuccess(String path) {
-        Toast.makeText(context, "Done : " + path, Toast.LENGTH_SHORT).show();
+        IApp.showToast("Done : " + path);
         if (recordTimeText != null) {
             recordTimeText.setVisibility(View.GONE);
         }
@@ -523,10 +552,67 @@ public class UsbMicroCamManager implements CamManager, MirrorFlipLayout.OnMirror
 
     @Override
     public void onRecordFail() {
-        Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Fail");
         if (recordTimeText != null) {
             recordTimeText.setVisibility(View.GONE);
         }
+    }
+
+    @Override
+    public void onTLRecordStartSuccess() {
+        IApp.showToast("Start");
+        if (recordTimeText != null) {
+            recordTimeText.setText(OutputUtil.getLongRecordTimeText(0));
+            recordTimeText.setVisibility(View.VISIBLE);
+        }
+    }
+
+    @Override
+    public void onTLRecordStartFail() {
+        IApp.showToast("Fail");
+    }
+
+    @Override
+    public void onTLRecordProgress(int recordSeconds) {
+        if (recordTimeText != null) {
+            recordTimeText.setText(OutputUtil.getLongRecordTimeText(recordSeconds));
+        }
+    }
+
+    @Override
+    public void onTLRecordSuccess(String path) {
+        IApp.showToast("Done : " + path);
+        if (recordTimeText != null) {
+            recordTimeText.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public void onTLRecordFail() {
+        IApp.showToast("Fail");
+        if (recordTimeText != null) {
+            recordTimeText.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public void onStackAvgStart() {
+        IApp.showToast("Stack Avg Start");
+    }
+
+    @Override
+    public void onStackAvgCancel() {
+        IApp.showToast("Stack Avg Cancel");
+    }
+
+    @Override
+    public void onStackAvgSuccess(Bitmap bitmap, String path) {
+        IApp.showToast("Stack Avg Success : " + path);
+    }
+
+    @Override
+    public void onStackAvgError(String error) {
+        IApp.showToast("Stack Avg Fail");
     }
 
     public static class Builder {

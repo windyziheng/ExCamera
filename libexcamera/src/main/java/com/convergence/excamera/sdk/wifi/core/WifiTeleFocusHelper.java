@@ -12,17 +12,23 @@ import com.convergence.excamera.sdk.wifi.config.base.WifiConfig;
  */
 public class WifiTeleFocusHelper extends TeleFocusHelper {
 
-    private WifiCameraController wifiCameraController;
+    private final WifiCameraController wifiCameraController;
 
     public WifiTeleFocusHelper(WifiCameraController wifiCameraController) {
         super();
         this.wifiCameraController = wifiCameraController;
+        bindImgProvider(wifiCameraController);
+        bindAFCallback(wifiCameraController);
     }
 
     @Override
-    protected void setFocus(int value) {
+    protected void setFocus(boolean isAF, int value) {
         if (wifiCameraController != null && wifiCameraController.isPreviewing()) {
-            wifiCameraController.setParam(WifiConfig.TAG_PARAM_FOCUS, value);
+            if (isAF) {
+                wifiCameraController.updateFocusExecute(value);
+            } else {
+                wifiCameraController.setParam(WifiConfig.TAG_PARAM_FOCUS, value);
+            }
         }
     }
 }

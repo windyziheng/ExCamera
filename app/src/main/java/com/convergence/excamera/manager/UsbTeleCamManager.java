@@ -9,10 +9,14 @@ import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 
+import com.convergence.excamera.IApp;
 import com.convergence.excamera.sdk.common.ActionState;
 import com.convergence.excamera.sdk.common.OutputUtil;
 import com.convergence.excamera.sdk.common.callback.OnCameraPhotographListener;
 import com.convergence.excamera.sdk.common.callback.OnCameraRecordListener;
+import com.convergence.excamera.sdk.common.callback.OnCameraStackAvgListener;
+import com.convergence.excamera.sdk.common.callback.OnCameraTLRecordListener;
+import com.convergence.excamera.sdk.common.callback.OnTeleAFListener;
 import com.convergence.excamera.sdk.usb.UsbCameraState;
 import com.convergence.excamera.sdk.usb.core.UsbCameraController;
 import com.convergence.excamera.sdk.usb.core.UsbCameraView;
@@ -42,7 +46,7 @@ import java.util.List;
 public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorFlipListener,
         TeleFocusLayout.OnTeleFocusListener, ConfigMixLayout.OnMixConfigListener,
         ConfigComLayout.OnComConfigListener, UsbCameraController.OnControlListener,
-        OnCameraPhotographListener, OnCameraRecordListener {
+        OnCameraPhotographListener, OnCameraRecordListener, OnCameraTLRecordListener, OnCameraStackAvgListener, OnTeleAFListener {
 
     private static final int EXPOSURE_MODE_AUTO = 8;
     private static final int EXPOSURE_MODE_MANUAL = 1;
@@ -69,6 +73,9 @@ public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorF
         usbCameraController.setOnControlListener(this);
         usbCameraController.setOnCameraPhotographListener(this);
         usbCameraController.setOnCameraRecordListener(this);
+        usbCameraController.setOnCameraTLRecordListener(this);
+        usbCameraController.setOnCameraStackAvgListener(this);
+        usbCameraController.setOnTeleAFListener(this);
         if (configLayout != null) {
             configLayout.setOnMirrorFlipListener(this);
             configLayout.setOnTeleFocusListener(this);
@@ -126,6 +133,26 @@ public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorF
     }
 
     @Override
+    public void startTLRecord(int timeLapseRate) {
+        usbCameraController.startTLRecord(timeLapseRate);
+    }
+
+    @Override
+    public void stopTLRecord() {
+        usbCameraController.stopTLRecord();
+    }
+
+    @Override
+    public void startStackAvg() {
+        usbCameraController.startStackAvg();
+    }
+
+    @Override
+    public void cancelStackAvg() {
+        usbCameraController.cancelStackAvg();
+    }
+
+    @Override
     public void showResolutionSelection() {
         UsbCameraSetting usbCameraSetting = UsbCameraSetting.getInstance();
         if (!isPreviewing() || !usbCameraSetting.isAvailable()) {
@@ -160,6 +187,11 @@ public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorF
     @Override
     public boolean isRecording() {
         return usbCameraController.getCurActionState() == ActionState.Recording;
+    }
+
+    @Override
+    public boolean isTLRecording() {
+        return usbCameraController.getCurActionState() == ActionState.TLRecording;
     }
 
     /**
@@ -326,6 +358,9 @@ public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorF
 
     @Override
     public void onPreviewStop() {
+        if (usbCameraController.isTeleAFRunning()) {
+            usbCameraController.stopTeleAF();
+        }
         if (fpsText != null) {
             fpsText.setVisibility(View.GONE);
         }
@@ -359,6 +394,18 @@ public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorF
         editor.setIsFlipHorizontal(isFlipHorizontal);
         editor.setIsFlipVertical(isFlipVertical);
         usbCameraController.updateFlip();
+    }
+
+    @Override
+    public void onTeleAFClick() {
+        if (!isPreviewing()) {
+            return;
+        }
+        if (usbCameraController.isTeleAFRunning()) {
+            usbCameraController.stopTeleAF();
+        } else {
+            usbCameraController.startTeleAF();
+        }
     }
 
     @Override
@@ -483,17 +530,17 @@ public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorF
 
     @Override
     public void onTakePhotoSuccess(String path) {
-        Toast.makeText(context, "Done : " + path, Toast.LENGTH_SHORT).show();
+        IApp.showToast("Done : " + path);
     }
 
     @Override
     public void onTakePhotoFail() {
-        Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Fail");
     }
 
     @Override
     public void onRecordStartSuccess() {
-        Toast.makeText(context, "Start", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Start");
         if (recordTimeText != null) {
             recordTimeText.setText(OutputUtil.getRecordTimeText(0));
             recordTimeText.setVisibility(View.VISIBLE);
@@ -502,7 +549,7 @@ public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorF
 
     @Override
     public void onRecordStartFail() {
-        Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Fail");
     }
 
     @Override
@@ -514,7 +561,7 @@ public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorF
 
     @Override
     public void onRecordSuccess(String path) {
-        Toast.makeText(context, "Done : " + path, Toast.LENGTH_SHORT).show();
+        IApp.showToast("Done : " + path);
         if (recordTimeText != null) {
             recordTimeText.setVisibility(View.GONE);
         }
@@ -522,10 +569,77 @@ public class UsbTeleCamManager implements CamManager, MirrorFlipLayout.OnMirrorF
 
     @Override
     public void onRecordFail() {
-        Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Fail");
         if (recordTimeText != null) {
             recordTimeText.setVisibility(View.GONE);
         }
+    }
+
+    @Override
+    public void onTLRecordStartSuccess() {
+        IApp.showToast("Start");
+        if (recordTimeText != null) {
+            recordTimeText.setText(OutputUtil.getLongRecordTimeText(0));
+            recordTimeText.setVisibility(View.VISIBLE);
+        }
+    }
+
+    @Override
+    public void onTLRecordStartFail() {
+        IApp.showToast("Fail");
+    }
+
+    @Override
+    public void onTLRecordProgress(int recordSeconds) {
+        if (recordTimeText != null) {
+            recordTimeText.setText(OutputUtil.getLongRecordTimeText(recordSeconds));
+        }
+    }
+
+    @Override
+    public void onTLRecordSuccess(String path) {
+        IApp.showToast("Done : " + path);
+        if (recordTimeText != null) {
+            recordTimeText.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public void onTLRecordFail() {
+        IApp.showToast("Fail");
+        if (recordTimeText != null) {
+            recordTimeText.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public void onStackAvgStart() {
+        IApp.showToast("Stack Avg Start");
+    }
+
+    @Override
+    public void onStackAvgCancel() {
+        IApp.showToast("Stack Avg Cancel");
+    }
+
+    @Override
+    public void onStackAvgSuccess(Bitmap bitmap, String path) {
+        IApp.showToast("Stack Avg Success : " + path);
+    }
+
+    @Override
+    public void onStackAvgError(String error) {
+        IApp.showToast("Stack Avg Fail");
+    }
+
+    @Override
+    public void onStartTeleAF(boolean isRunningReset) {
+        configLayout.getItemFocus().updateAFState(true);
+    }
+
+    @Override
+    public void onStopTeleAF() {
+        configLayout.getItemFocus().updateAFState(false);
     }
 
     public static class Builder {

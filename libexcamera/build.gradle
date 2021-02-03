@@ -46,11 +46,11 @@ dependencies {
 }
 
 publish {
-    userOrg = 'convergence'
+    userOrg = 'cvgc'
     repoName = 'github'
     groupId = 'com.convergence'
     artifactId = 'excamera'
-    publishVersion = '1.0.2'
+    publishVersion = '1.1.0'
     desc = 'Android SDK for devices designed by Convergence Ltd.'
     website = 'https://github.com/ConvergenceSoftware/ExCamera'
 }

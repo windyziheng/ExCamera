@@ -12,15 +12,17 @@ import com.serenegiant.usb.config.base.UVCConfig;
  */
 public class UsbTeleFocusHelper extends TeleFocusHelper {
 
-    private UsbCameraController usbCameraController;
+    protected final UsbCameraController usbCameraController;
 
     public UsbTeleFocusHelper(UsbCameraController usbCameraController) {
         super();
         this.usbCameraController = usbCameraController;
+        bindImgProvider(usbCameraController);
+        bindAFCallback(usbCameraController);
     }
 
     @Override
-    protected void setFocus(int value) {
+    protected void setFocus(boolean isAF, int value) {
         if (usbCameraController != null && usbCameraController.isPreviewing()) {
             usbCameraController.setParam(UVCConfig.TAG_PARAM_FOCUS, value);
         }

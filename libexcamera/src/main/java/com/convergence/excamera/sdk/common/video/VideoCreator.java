@@ -2,11 +2,14 @@ package com.convergence.excamera.sdk.common.video;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.media.MediaScannerConnection;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Message;
 import android.util.Size;
 
 import com.convergence.excamera.sdk.common.MediaScanner;
+import com.convergence.excamera.sdk.common.callback.ImgProvider;
 
 import java.io.File;
 import java.util.Queue;
@@ -52,32 +55,32 @@ public class VideoCreator implements Handler.Callback {
     }
 
     private Context context;
-    private DataProvider dataProvider;
+    private ImgProvider imgProvider;
     private int frame;
     private OnCreateVideoListener listener;
 
-    private MediaScanner mediaScanner;
-    private Handler handler;
+    private Handler mainHandler;
+    private Handler backgroundHandler;
+    private HandlerThread backgroundThread;
     private Mp4MediaMuxer mp4MediaMuxer;
     private Queue<Frame> frameQueue;
     private State curState;
     private String videoPath;
     private Size videoSize;
+    private int timeLapseRate;
     private int runTime;
     private long frameProvideDelay;
 
     private VideoCreator(Builder builder) {
         this.context = builder.context;
-        this.dataProvider = builder.dataProvider;
+        this.imgProvider = builder.imgProvider;
         this.frame = builder.frame;
         this.listener = builder.listener;
-        mediaScanner = new MediaScanner(context);
         mp4MediaMuxer = new Mp4MediaMuxer();
-        handler = new Handler(this);
+        mainHandler = new Handler(this);
         frameQueue = new LinkedTransferQueue<>();
         reset(true);
     }
-
 
     /**
      * 配置初始化
@@ -86,9 +89,24 @@ public class VideoCreator implements Handler.Callback {
      * @param videoSize 视频分辨率
      */
     public void setup(String videoPath, Size videoSize) {
+        setup(videoPath, videoSize, 1);
+    }
+
+    /**
+     * 配置初始化
+     *
+     * @param videoPath     视频存储路径
+     * @param videoSize     视频分辨率
+     * @param timeLapseRate 延时摄影倍率
+     */
+    public void setup(String videoPath, Size videoSize, int timeLapseRate) {
         this.videoPath = videoPath;
         this.videoSize = videoSize;
-        frameProvideDelay = 1000L / frame;
+        this.timeLapseRate = Math.max(1, timeLapseRate);
+        frameProvideDelay = (long) ((float) this.timeLapseRate / frame * 1000);
+        backgroundThread = new HandlerThread("VideoCreator");
+        backgroundThread.start();
+        backgroundHandler = new Handler(backgroundThread.getLooper());
         fixPathDir(videoPath);
         mp4MediaMuxer.setup(videoSize, videoPath, frame, new Mp4MediaMuxer.OnSetupListener() {
             @Override
@@ -118,10 +136,10 @@ public class VideoCreator implements Handler.Callback {
             case Ready:
                 changeState(State.Running);
                 mp4MediaMuxer.start();
-                handler.postDelayed(timeRunnable, 1000);
-                handler.post(frameRunnable);
-                handler.post(compoundRunnable);
-                handler.post(decodeRunnable);
+                mainHandler.postDelayed(timeRunnable, 1000);
+                mainHandler.post(frameRunnable);
+                backgroundHandler.post(compoundRunnable);
+                backgroundHandler.post(decodeRunnable);
                 sendMsg(MSG_WHAT_START_SUCCESS);
                 break;
             default:
@@ -135,7 +153,8 @@ public class VideoCreator implements Handler.Callback {
     public void stop() {
         if (isRunning()) {
             if (new File(videoPath).exists()) {
-                mediaScanner.scanFile(videoPath, () -> sendMsg(MSG_WHAT_STOP_SUCCESS));
+                MediaScannerConnection.scanFile(context.getApplicationContext(), new String[]{videoPath}, null,
+                        (path, uri) -> sendMsg(MSG_WHAT_STOP_SUCCESS));
             } else {
                 sendMsg(MSG_WHAT_STOP_FAIL, "Video file doesn't exist");
             }
@@ -147,10 +166,23 @@ public class VideoCreator implements Handler.Callback {
      * 释放资源
      */
     private void release() {
-        handler.removeCallbacks(timeRunnable);
-        handler.removeCallbacks(frameRunnable);
-        handler.removeCallbacks(compoundRunnable);
-        handler.removeCallbacks(decodeRunnable);
+        mainHandler.removeCallbacks(timeRunnable);
+        mainHandler.removeCallbacks(frameRunnable);
+        if (backgroundHandler != null) {
+            backgroundHandler.removeCallbacks(compoundRunnable);
+            backgroundHandler.removeCallbacks(decodeRunnable);
+            backgroundHandler = null;
+        }
+        if (backgroundThread != null) {
+            try {
+                backgroundThread.quitSafely();
+                backgroundThread.join();
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                backgroundThread = null;
+            }
+        }
         mp4MediaMuxer.release();
         reset(false);
     }
@@ -188,7 +220,7 @@ public class VideoCreator implements Handler.Callback {
         if (!isRunning() || bitmap == null) {
             return;
         }
-        long timeUs = System.nanoTime() / 1000;
+        long timeUs = System.nanoTime() / 1000 / timeLapseRate;
         frameQueue.offer(new Frame(bitmap, timeUs));
     }
 
@@ -205,14 +237,14 @@ public class VideoCreator implements Handler.Callback {
     }
 
     private void sendMsg(int what) {
-        handler.sendEmptyMessage(what);
+        mainHandler.sendEmptyMessage(what);
     }
 
     private void sendMsg(int what, Object obj) {
         Message msg = new Message();
         msg.what = what;
         msg.obj = obj;
-        handler.sendMessage(msg);
+        mainHandler.sendMessage(msg);
     }
 
     public State getCurState() {
@@ -236,7 +268,8 @@ public class VideoCreator implements Handler.Callback {
     }
 
     public boolean isRunning() {
-        return curState == State.Running;
+        return curState == State.Running && backgroundThread != null && backgroundThread.isAlive()
+                && backgroundHandler != null;
     }
 
     /**
@@ -247,8 +280,8 @@ public class VideoCreator implements Handler.Callback {
         @Override
         public void run() {
             runTime++;
-            handler.sendEmptyMessage(MSG_WHAT_RUN_TIME);
-            handler.postDelayed(this, 1000);
+            mainHandler.sendEmptyMessage(MSG_WHAT_RUN_TIME);
+            mainHandler.postDelayed(this, 1000);
         }
     };
 
@@ -261,12 +294,12 @@ public class VideoCreator implements Handler.Callback {
         @Override
         public void run() {
             long startTime = System.currentTimeMillis();
-            offerBitmap(dataProvider.provideBitmap());
+            offerBitmap(imgProvider.provideBitmap());
             long costTime = System.currentTimeMillis() - startTime;
             if (frameProvideDelay > costTime) {
-                handler.postDelayed(this, frameProvideDelay - costTime);
+                mainHandler.postDelayed(this, frameProvideDelay - costTime);
             } else {
-                handler.post(this);
+                mainHandler.post(this);
             }
         }
     };
@@ -283,7 +316,7 @@ public class VideoCreator implements Handler.Callback {
                 mp4MediaMuxer.encodeData(frame.getBitmap(), frame.getTimeUS());
             }
             if (isRunning()) {
-                handler.postDelayed(this, 100);
+                mainHandler.postDelayed(this, 100);
             }
         }
     };
@@ -299,7 +332,7 @@ public class VideoCreator implements Handler.Callback {
                 return;
             }
             mp4MediaMuxer.decodeData();
-            handler.post(this);
+            mainHandler.post(this);
         }
     };
 
@@ -330,13 +363,13 @@ public class VideoCreator implements Handler.Callback {
     public static class Builder {
 
         private Context context;
-        private DataProvider dataProvider;
-        private int frame = 30;
+        private ImgProvider imgProvider;
+        private int frame = FRAME_STANDARD_RECORD;
         private OnCreateVideoListener listener;
 
-        public Builder(Context context, DataProvider dataProvider, OnCreateVideoListener listener) {
+        public Builder(Context context, ImgProvider imgProvider, OnCreateVideoListener listener) {
             this.context = context;
-            this.dataProvider = dataProvider;
+            this.imgProvider = imgProvider;
             this.listener = listener;
         }
 
@@ -350,19 +383,6 @@ public class VideoCreator implements Handler.Callback {
         public VideoCreator build() {
             return new VideoCreator(this);
         }
-    }
-
-    /**
-     * 视频合成数据源
-     */
-    public interface DataProvider {
-
-        /**
-         * 提供图像Bitmap
-         *
-         * @return 图像Bitmap
-         */
-        Bitmap provideBitmap();
     }
 
     /**

@@ -5,14 +5,16 @@ import android.graphics.Bitmap;
 import android.util.Size;
 import android.view.View;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 
+import com.convergence.excamera.IApp;
 import com.convergence.excamera.sdk.common.ActionState;
 import com.convergence.excamera.sdk.common.OutputUtil;
 import com.convergence.excamera.sdk.common.callback.OnCameraPhotographListener;
 import com.convergence.excamera.sdk.common.callback.OnCameraRecordListener;
+import com.convergence.excamera.sdk.common.callback.OnCameraStackAvgListener;
+import com.convergence.excamera.sdk.common.callback.OnCameraTLRecordListener;
 import com.convergence.excamera.sdk.wifi.WifiCameraState;
 import com.convergence.excamera.sdk.wifi.config.base.WifiAutoConfig;
 import com.convergence.excamera.sdk.wifi.config.base.WifiConfig;
@@ -43,7 +45,7 @@ import java.util.List;
  */
 public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirrorFlipListener,
         ConfigMixLayout.OnMixConfigListener, ConfigComLayout.OnComConfigListener, WifiCameraController.OnControlListener,
-        OnCameraPhotographListener, OnCameraRecordListener {
+        OnCameraPhotographListener, OnCameraRecordListener, OnCameraTLRecordListener, OnCameraStackAvgListener {
 
     private Context context;
     private WifiCameraView wifiCameraView;
@@ -67,6 +69,8 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
         wifiCameraController.setOnControlListener(this);
         wifiCameraController.setOnCameraPhotographListener(this);
         wifiCameraController.setOnCameraRecordListener(this);
+        wifiCameraController.setOnCameraTLRecordListener(this);
+        wifiCameraController.setOnCameraStackAvgListener(this);
         if (configLayout != null) {
             configLayout.setOnMirrorFlipListener(this);
             configLayout.setOnMixConfigListener(this);
@@ -123,6 +127,26 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
     }
 
     @Override
+    public void startTLRecord(int timeLapseRate) {
+        wifiCameraController.startTLRecord(timeLapseRate);
+    }
+
+    @Override
+    public void stopTLRecord() {
+        wifiCameraController.stopTLRecord();
+    }
+
+    @Override
+    public void startStackAvg() {
+        wifiCameraController.startStackAvg();
+    }
+
+    @Override
+    public void cancelStackAvg() {
+        wifiCameraController.cancelStackAvg();
+    }
+
+    @Override
     public void showResolutionSelection() {
         WifiCameraSetting wifiCameraSetting = WifiCameraSetting.getInstance();
         if (!isPreviewing() || !wifiCameraSetting.isAvailable()) {
@@ -159,12 +183,12 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
 
             @Override
             public void onSuccess() {
-                Toast.makeText(context, "Done : " + width + " * " + height, Toast.LENGTH_SHORT).show();
+                IApp.showToast("Done : " + width + " * " + height);
             }
 
             @Override
             public void onFail() {
-                Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+                IApp.showToast("Fail");
             }
         });
     }
@@ -179,6 +203,11 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
         return wifiCameraController.getCurActionState() == ActionState.Recording;
     }
 
+    @Override
+    public boolean isTLRecording() {
+        return wifiCameraController.getCurActionState() == ActionState.TLRecording;
+    }
+
     /**
      * 重置所有参数布局
      */
@@ -189,7 +218,7 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
         WifiCameraSP.Editor editor = WifiCameraSP.getEditor(context);
         MirrorFlipLayout itemFlip = configLayout.getItemFlip();
         itemFlip.initSwitch(editor.isFlipHorizontal(), editor.isFlipVertical());
-        if (!isPreviewing()) {
+        if (!WifiCameraSetting.getInstance().isAvailable()) {
             return;
         }
         resetFocusLayout();
@@ -273,7 +302,7 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
      * @param isAuto 是否自动
      */
     private void setConfigAuto(String tag, boolean isAuto) {
-        if (isPreviewing()) {
+        if (WifiCameraSetting.getInstance().isAvailable()) {
             wifiCameraController.setAuto(tag, isAuto);
         }
     }
@@ -285,7 +314,7 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
      * @param value 参数值
      */
     private void setConfigParam(String tag, int value) {
-        if (isPreviewing()) {
+        if (WifiCameraSetting.getInstance().isAvailable()) {
             wifiCameraController.setParam(tag, value);
         }
     }
@@ -297,7 +326,7 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
      * @param listener 重置监听
      */
     private void resetConfigParam(String tag, @Nullable OnConfigResetListener listener) {
-        if (isPreviewing()) {
+        if (WifiCameraSetting.getInstance().isAvailable()) {
             wifiCameraController.resetConfig(tag);
             int value = wifiCameraController.getParam(tag);
             if (listener != null) {
@@ -434,7 +463,7 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
             fpsText.setText(OutputUtil.getAverageFPSText(0));
             fpsText.setVisibility(View.VISIBLE);
         }
-        Toast.makeText(context, isRetry ? "Restore" : "Connect", Toast.LENGTH_SHORT).show();
+        IApp.showToast(isRetry ? "Restore" : "Connect");
     }
 
     @Override
@@ -442,7 +471,7 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
         if (fpsText != null) {
             fpsText.setVisibility(View.GONE);
         }
-        Toast.makeText(context, isRetry ? "Retry" : "DisConnect", Toast.LENGTH_SHORT).show();
+        IApp.showToast(isRetry ? "Retry" : "DisConnect");
     }
 
     @Override
@@ -486,17 +515,17 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
 
     @Override
     public void onTakePhotoSuccess(String path) {
-        Toast.makeText(context, "Done : " + path, Toast.LENGTH_SHORT).show();
+        IApp.showToast("Done : " + path);
     }
 
     @Override
     public void onTakePhotoFail() {
-        Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Fail");
     }
 
     @Override
     public void onRecordStartSuccess() {
-        Toast.makeText(context, "Start", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Start");
         if (recordTimeText != null) {
             recordTimeText.setText(OutputUtil.getRecordTimeText(0));
             recordTimeText.setVisibility(View.VISIBLE);
@@ -505,7 +534,7 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
 
     @Override
     public void onRecordStartFail() {
-        Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Fail");
     }
 
     @Override
@@ -517,7 +546,7 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
 
     @Override
     public void onRecordSuccess(String path) {
-        Toast.makeText(context, "Done : " + path, Toast.LENGTH_SHORT).show();
+        IApp.showToast("Done : " + path);
         if (recordTimeText != null) {
             recordTimeText.setVisibility(View.GONE);
         }
@@ -525,10 +554,67 @@ public class WifiMicroCamManager implements CamManager, MirrorFlipLayout.OnMirro
 
     @Override
     public void onRecordFail() {
-        Toast.makeText(context, "Fail", Toast.LENGTH_SHORT).show();
+        IApp.showToast("Fail");
         if (recordTimeText != null) {
             recordTimeText.setVisibility(View.GONE);
         }
+    }
+
+    @Override
+    public void onTLRecordStartSuccess() {
+        IApp.showToast("Start");
+        if (recordTimeText != null) {
+            recordTimeText.setText(OutputUtil.getLongRecordTimeText(0));
+            recordTimeText.setVisibility(View.VISIBLE);
+        }
+    }
+
+    @Override
+    public void onTLRecordStartFail() {
+        IApp.showToast("Fail");
+    }
+
+    @Override
+    public void onTLRecordProgress(int recordSeconds) {
+        if (recordTimeText != null) {
+            recordTimeText.setText(OutputUtil.getLongRecordTimeText(recordSeconds));
+        }
+    }
+
+    @Override
+    public void onTLRecordSuccess(String path) {
+        IApp.showToast("Done : " + path);
+        if (recordTimeText != null) {
+            recordTimeText.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public void onTLRecordFail() {
+        IApp.showToast("Fail");
+        if (recordTimeText != null) {
+            recordTimeText.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public void onStackAvgStart() {
+        IApp.showToast("Stack Avg Start");
+    }
+
+    @Override
+    public void onStackAvgCancel() {
+        IApp.showToast("Stack Avg Cancel");
+    }
+
+    @Override
+    public void onStackAvgSuccess(Bitmap bitmap, String path) {
+        IApp.showToast("Stack Avg Success : " + path);
+    }
+
+    @Override
+    public void onStackAvgError(String error) {
+        IApp.showToast("Stack Avg Fail");
     }
 
     public static class Builder {

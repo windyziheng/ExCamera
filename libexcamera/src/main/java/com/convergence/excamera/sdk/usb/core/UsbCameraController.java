@@ -9,20 +9,12 @@ import android.util.Size;
 import androidx.annotation.NonNull;
 
 import com.convergence.excamera.sdk.common.ActionState;
+import com.convergence.excamera.sdk.common.BaseExCamController;
 import com.convergence.excamera.sdk.common.CameraLogger;
-import com.convergence.excamera.sdk.common.FrameRateObserver;
-import com.convergence.excamera.sdk.common.MediaScanner;
-import com.convergence.excamera.sdk.common.OutputUtil;
-import com.convergence.excamera.sdk.common.PhotoSaver;
 import com.convergence.excamera.sdk.common.TeleFocusHelper;
-import com.convergence.excamera.sdk.common.callback.OnCameraPhotographListener;
-import com.convergence.excamera.sdk.common.callback.OnCameraRecordListener;
-import com.convergence.excamera.sdk.common.video.ExCameraRecorder;
-import com.convergence.excamera.sdk.common.video.VideoCreator;
 import com.convergence.excamera.sdk.usb.UsbCameraConstant;
 import com.convergence.excamera.sdk.usb.UsbCameraState;
 import com.convergence.excamera.sdk.usb.entity.UsbCameraResolution;
-import com.convergence.excamera.sdk.usb.entity.UsbCameraSP;
 import com.convergence.excamera.sdk.usb.entity.UsbCameraSetting;
 import com.serenegiant.usb.config.base.UVCAutoConfig;
 import com.serenegiant.usb.config.base.UVCParamConfig;
@@ -32,43 +24,39 @@ import com.serenegiant.usb.config.base.UVCParamConfig;
  * 应用中直接操作此类即可完成大部分操作
  *
  * @Author WangZiheng
- * @CreateDate 2020-11-06
+ * @CreateDate 2021-02-02
  * @Organization Convergence Ltd.
  */
-public class UsbCameraController implements Handler.Callback, UsbCameraCommand.OnConnectListener,
-        UsbCameraCommand.OnCommandListener, ExCameraRecorder.OnRecordListener,
-        PhotoSaver.OnPhotoSaverListener, VideoCreator.DataProvider, FrameRateObserver.OnFrameRateListener {
+public class UsbCameraController extends BaseExCamController<UsbCameraView> implements Handler.Callback,
+        UsbCameraCommand.OnConnectListener, UsbCameraCommand.OnCommandListener {
 
     private static final int MSG_PREVIEW_START = 100;
     private static final int MSG_PREVIEW_STOP = 101;
 
-    private CameraLogger cameraLogger = UsbCameraConstant.GetLogger();
-
-    private Context context;
-    private UsbCameraView usbCameraView;
     private UsbCameraCommand usbCameraCommand;
-    private UsbCameraRecorder usbCameraRecorder;
-    private PhotoSaver photoSaver;
-    private TeleFocusHelper teleFocusHelper;
     private Handler handler;
-    private MediaScanner mediaScanner;
-    private FrameRateObserver frameRateObserver;
-    private ActionState curActionState = ActionState.Normal;
-
     private OnControlListener onControlListener;
-    private OnCameraPhotographListener onCameraPhotographListener;
-    private OnCameraRecordListener onCameraRecordListener;
 
-    public UsbCameraController(Context context, UsbCameraView usbCameraView) {
-        this.context = context;
-        this.usbCameraView = usbCameraView;
-        usbCameraCommand = new UsbCameraCommand(context, usbCameraView);
-        usbCameraRecorder = new UsbCameraRecorder(context, this, this);
-        photoSaver = new PhotoSaver(this);
-        teleFocusHelper = new UsbTeleFocusHelper(this);
+    public UsbCameraController(Context context, UsbCameraView exCameraView) {
+        super(context, exCameraView);
+    }
+
+    @NonNull
+    @Override
+    protected CameraLogger bindLogger() {
+        return UsbCameraConstant.GetLogger();
+    }
+
+    @NonNull
+    @Override
+    protected TeleFocusHelper bindTeleFocusHelper() {
+        return new UsbTeleFocusHelper(this);
+    }
+
+    @Override
+    protected void init() {
+        usbCameraCommand = new UsbCameraCommand(context, exCameraView);
         handler = new Handler(this);
-        mediaScanner = new MediaScanner(context);
-        frameRateObserver = new FrameRateObserver(this);
         usbCameraCommand.setOnCommandListener(this);
         usbCameraCommand.setOnConnectListener(this);
     }
@@ -118,30 +106,6 @@ public class UsbCameraController implements Handler.Callback, UsbCameraCommand.O
     }
 
     /**
-     * 设置拍照监听
-     */
-    public void setOnCameraPhotographListener(OnCameraPhotographListener onCameraPhotographListener) {
-        this.onCameraPhotographListener = onCameraPhotographListener;
-    }
-
-    /**
-     * 设置录像监听
-     */
-    public void setOnCameraRecordListener(OnCameraRecordListener onCameraRecordListener) {
-        this.onCameraRecordListener = onCameraRecordListener;
-    }
-
-    /**
-     * 更新分辨率
-     *
-     * @param width  分辨率宽
-     * @param height 分辨率高
-     */
-    public void updateResolution(int width, int height) {
-        usbCameraCommand.updateResolution(width, height);
-    }
-
-    /**
      * 更新镜像翻转参数
      */
     public void updateFlip() {
@@ -149,111 +113,10 @@ public class UsbCameraController implements Handler.Callback, UsbCameraCommand.O
     }
 
     /**
-     * 拍照
-     */
-    public void takePhoto() {
-        String path = OutputUtil.getRandomPicPath(UsbCameraSP.getEditor(context).getCameraOutputRootPath());
-        takePhoto(path);
-    }
-
-    /**
-     * 拍照（自定义路径）
-     */
-    public void takePhoto(String path) {
-        if (!isPreviewing()) {
-            if (onCameraPhotographListener != null) {
-                onCameraPhotographListener.onTakePhotoFail();
-            }
-            return;
-        }
-        switch (curActionState) {
-            case Normal:
-                updateActionState(ActionState.Photographing);
-                photoSaver.addTask(path);
-                if (onCameraPhotographListener != null) {
-                    onCameraPhotographListener.onTakePhotoStart();
-                }
-                break;
-            case Photographing:
-            default:
-                break;
-            case Recording:
-                if (onCameraPhotographListener != null) {
-                    onCameraPhotographListener.onTakePhotoFail();
-                }
-                break;
-        }
-    }
-
-    /**
-     * 开始录像
-     */
-    public void startRecord() {
-        String path = OutputUtil.getRandomVideoPath(UsbCameraSP.getEditor(context).getCameraOutputRootPath());
-        startRecord(path);
-    }
-
-    /**
-     * 开始录像（自定义路径）
-     */
-    public void startRecord(String path) {
-        if (!isPreviewing()) {
-            if (onCameraRecordListener != null) {
-                onCameraRecordListener.onRecordStartFail();
-            }
-            return;
-        }
-        switch (curActionState) {
-            case Normal:
-                UsbCameraSetting usbCameraSetting = UsbCameraSetting.getInstance();
-                if (!usbCameraSetting.isAvailable()) {
-                    if (onCameraRecordListener != null) {
-                        onCameraRecordListener.onRecordStartFail();
-                    }
-                    break;
-                }
-                UsbCameraResolution.Resolution resolution = usbCameraSetting.getUsbCameraResolution().getCurResolution();
-                Size videoSize = new Size(resolution.getWidth(), resolution.getHeight());
-                usbCameraRecorder.setup(path, videoSize);
-                break;
-            case Photographing:
-                if (onCameraRecordListener != null) {
-                    onCameraRecordListener.onRecordStartFail();
-                }
-                break;
-            case Recording:
-            default:
-                break;
-        }
-    }
-
-
-    /**
-     * 停止录像
-     */
-    public void stopRecord() {
-        usbCameraRecorder.stop();
-    }
-
-    /**
-     * 是否正在预览
-     */
-    public boolean isPreviewing() {
-        return usbCameraCommand.isPreviewing();
-    }
-
-    /**
      * 获取当前USB相机状态
      */
     public UsbCameraState getCurUsbState() {
         return usbCameraCommand.getCurState();
-    }
-
-    /**
-     * 获取当前操作状态
-     */
-    public ActionState getCurActionState() {
-        return curActionState;
     }
 
     /**
@@ -357,36 +220,93 @@ public class UsbCameraController implements Handler.Callback, UsbCameraCommand.O
         setParam(tag, uvcParamConfig.getValueByPercentQuadratic(percent));
     }
 
-    /**
-     * 开始望远相机调焦
-     *
-     * @param isBack 是否向后调焦
-     */
-    public void startTeleFocus(boolean isBack) {
-        teleFocusHelper.startPress(isBack);
-    }
-
-    /**
-     * 结束望远相机调焦
-     *
-     * @param isBack 是否向后调焦
-     */
-    public void stopTeleFocus(boolean isBack) {
-        teleFocusHelper.stopPress(isBack);
-    }
-
-    /**
-     * 更新当前功能状态
-     */
-    private void updateActionState(ActionState state) {
-        if (curActionState == state) {
-            return;
-        }
-        cameraLogger.LogD("Action State Update : " + curActionState + " ==> " + state);
-        curActionState = state;
+    @Override
+    protected void onUpdateActionState(ActionState state) {
         if (onControlListener != null) {
             onControlListener.onActionStateUpdate(state);
         }
+    }
+
+    @Override
+    protected void onUpdateResolution(int width, int height) {
+        usbCameraCommand.updateResolution(width, height);
+    }
+
+    @Override
+    protected void onTakePhoto(String path) {
+        updateActionState(ActionState.Photographing);
+        photoSaver.addTask(path);
+        if (onCameraPhotographListener != null) {
+            onCameraPhotographListener.onTakePhotoStart();
+        }
+    }
+
+    @Override
+    protected void onSetupRecord(String path) {
+        UsbCameraSetting usbCameraSetting = UsbCameraSetting.getInstance();
+        if (!usbCameraSetting.isAvailable()) {
+            if (onCameraRecordListener != null) {
+                onCameraRecordListener.onRecordStartFail();
+            }
+            return;
+        }
+        UsbCameraResolution.Resolution resolution = usbCameraSetting.getUsbCameraResolution().getCurResolution();
+        Size videoSize = new Size(resolution.getWidth(), resolution.getHeight());
+        exCameraRecorder.setup(path, videoSize);
+    }
+
+    @Override
+    protected void onStopRecord() {
+        exCameraRecorder.stop();
+    }
+
+    @Override
+    protected void onSetupTLRecord(String path, int timeLapseRate) {
+        UsbCameraSetting usbCameraSetting = UsbCameraSetting.getInstance();
+        if (!usbCameraSetting.isAvailable()) {
+            if (onCameraRecordListener != null) {
+                onCameraRecordListener.onRecordStartFail();
+            }
+            return;
+        }
+        UsbCameraResolution.Resolution resolution = usbCameraSetting.getUsbCameraResolution().getCurResolution();
+        Size videoSize = new Size(resolution.getWidth(), resolution.getHeight());
+        exCameraTLRecorder.setup(path, videoSize, timeLapseRate);
+    }
+
+    @Override
+    protected void onStopTLRecord() {
+        exCameraTLRecorder.stop();
+    }
+
+    @Override
+    protected void onStartStackAvg(String path) {
+        stackAvgOperator.start(path);
+    }
+
+    @Override
+    protected void onCancelStackAvg() {
+        stackAvgOperator.cancel();
+    }
+
+    @Override
+    public boolean isPreviewing() {
+        return usbCameraCommand.isPreviewing();
+    }
+
+    @Override
+    public void onObserveFPS(int instantFPS, float averageFPS) {
+        if (UsbCameraConstant.IS_LOG_FPS) {
+            cameraLogger.LogD("FPS : instant = " + instantFPS + " , average = " + averageFPS);
+        }
+        if (onControlListener != null) {
+            onControlListener.onLoadFPS(instantFPS, averageFPS);
+        }
+    }
+
+    @Override
+    public Bitmap provideBitmap() {
+        return usbCameraCommand.getLatestBitmap();
     }
 
     @Override
@@ -417,8 +337,11 @@ public class UsbCameraController implements Handler.Callback, UsbCameraCommand.O
 
     @Override
     public void onUsbDisConnect() {
-        if (curActionState == ActionState.Recording && usbCameraRecorder.isRecording()) {
+        if (curActionState == ActionState.Recording && exCameraRecorder.isRecording()) {
             stopRecord();
+        }
+        if (curActionState == ActionState.TLRecording && exCameraTLRecorder.isRecording()) {
+            stopTLRecord();
         }
         if (onControlListener != null) {
             onControlListener.onUsbDisConnect();
@@ -451,98 +374,6 @@ public class UsbCameraController implements Handler.Callback, UsbCameraCommand.O
     public void onPreviewStop() {
         frameRateObserver.stopObserve();
         handler.sendEmptyMessage(MSG_PREVIEW_STOP);
-    }
-
-    @Override
-    public void onSavePhotoSuccess(String path) {
-        mediaScanner.scanFile(path, null);
-        if (onCameraPhotographListener != null) {
-            onCameraPhotographListener.onTakePhotoDone();
-            onCameraPhotographListener.onTakePhotoSuccess(path);
-        }
-    }
-
-    @Override
-    public void onSavePhotoFail() {
-        if (onCameraPhotographListener != null) {
-            onCameraPhotographListener.onTakePhotoDone();
-            onCameraPhotographListener.onTakePhotoFail();
-        }
-    }
-
-    @Override
-    public void onSetupRecordSuccess() {
-        usbCameraRecorder.start();
-    }
-
-    @Override
-    public void onSetupRecordError() {
-        if (onCameraRecordListener != null) {
-            onCameraRecordListener.onRecordStartFail();
-        }
-    }
-
-    @Override
-    public void onStartRecordSuccess() {
-        updateActionState(ActionState.Recording);
-        if (onCameraRecordListener != null) {
-            onCameraRecordListener.onRecordStartSuccess();
-        }
-    }
-
-    @Override
-    public void onStartRecordError() {
-        if (onCameraRecordListener != null) {
-            onCameraRecordListener.onRecordStartFail();
-        }
-    }
-
-    @Override
-    public void onRecordProgress(int recordTime) {
-        if (onCameraRecordListener != null) {
-            onCameraRecordListener.onRecordProgress(recordTime);
-        }
-    }
-
-    @Override
-    public void onRecordSuccess(String videoPath) {
-        updateActionState(ActionState.Normal);
-        if (onCameraRecordListener != null) {
-            onCameraRecordListener.onRecordSuccess(videoPath);
-        }
-    }
-
-    @Override
-    public void onRecordError() {
-        updateActionState(ActionState.Normal);
-        if (onCameraRecordListener != null) {
-            onCameraRecordListener.onRecordFail();
-        }
-    }
-
-    @Override
-    public Bitmap provideBitmap() {
-        return usbCameraCommand.getLatestBitmap();
-    }
-
-    @Override
-    public void onObserveStart() {
-
-    }
-
-    @Override
-    public void onObserveFPS(int instantFPS, float averageFPS) {
-        if (UsbCameraConstant.IS_LOG_FPS) {
-            cameraLogger.LogD("FPS : instant = " + instantFPS + " , average = " + averageFPS);
-        }
-        if (onControlListener != null) {
-            onControlListener.onLoadFPS(instantFPS, averageFPS);
-        }
-    }
-
-    @Override
-    public void onObserveStop() {
-
     }
 
     @Override
